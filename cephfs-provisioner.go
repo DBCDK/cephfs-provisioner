@@ -17,6 +17,7 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -27,17 +28,16 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/kubernetes-sigs/sig-storage-lib-external-provisioner/controller"
-	"github.com/kubernetes-sigs/sig-storage-lib-external-provisioner/util"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/uuid"
-	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog"
+	"sigs.k8s.io/sig-storage-lib-external-provisioner/v9/controller"
+	"sigs.k8s.io/sig-storage-lib-external-provisioner/v9/util"
 )
 
 const (
@@ -116,13 +116,13 @@ func getSecretFromCephFSPersistentVolume(pv *v1.PersistentVolume) (*v1.SecretRef
 }
 
 // Provision creates a storage asset and returns a PV object representing it.
-func (p *cephFSProvisioner) Provision(options controller.VolumeOptions) (*v1.PersistentVolume, error) {
+func (p *cephFSProvisioner) Provision(ctx context.Context, options controller.ProvisionOptions) (*v1.PersistentVolume, controller.ProvisioningState, error) {
 	if options.PVC.Spec.Selector != nil {
-		return nil, fmt.Errorf("claim Selector is not supported")
+		return nil, controller.ProvisioningNoChange, fmt.Errorf("claim Selector is not supported")
 	}
-	cluster, adminID, adminSecret, pvcRoot, mon, deterministicNames, err := p.parseParameters(options.Parameters)
+	cluster, adminID, adminSecret, pvcRoot, mon, deterministicNames, err := p.parseParameters(options.StorageClass.Parameters)
 	if err != nil {
-		return nil, err
+		return nil, controller.ProvisioningNoChange, err
 	}
 	var share, user string
 	if deterministicNames {
@@ -160,13 +160,13 @@ func (p *cephFSProvisioner) Provision(options controller.VolumeOptions) (*v1.Per
 	output, cmdErr := cmd.CombinedOutput()
 	if cmdErr != nil {
 		klog.Errorf("failed to provision share %q for %q, err: %v, output: %v", share, user, cmdErr, string(output))
-		return nil, cmdErr
+		return nil, controller.ProvisioningNoChange, cmdErr
 	}
 	// validate output
 	res := &provisionOutput{}
 	json.Unmarshal([]byte(output), &res)
 	if res.User == "" || res.Secret == "" || res.Path == "" {
-		return nil, fmt.Errorf("invalid provisioner output")
+		return nil, controller.ProvisioningNoChange, fmt.Errorf("invalid provisioner output")
 	}
 	nameSpace := p.secretNamespace
 	if nameSpace == "" {
@@ -185,10 +185,17 @@ func (p *cephFSProvisioner) Provision(options controller.VolumeOptions) (*v1.Per
 		Type: "Opaque",
 	}
 
-	_, err = p.client.CoreV1().Secrets(nameSpace).Create(secret)
+	c := context.Background()
+	opts := metav1.CreateOptions{
+		TypeMeta:        metav1.TypeMeta{},
+		DryRun:          []string{},
+		FieldManager:    "",
+		FieldValidation: "",
+	}
+	_, err = p.client.CoreV1().Secrets(nameSpace).Create(c, secret, opts)
 	if err != nil && !apierrors.IsAlreadyExists(err) {
 		klog.Errorf("Cephfs Provisioner: create volume failed, err: %v", err)
-		return nil, fmt.Errorf("failed to create secret")
+		return nil, controller.ProvisioningNoChange, fmt.Errorf("failed to create secret")
 	}
 
 	pv := &v1.PersistentVolume{
@@ -200,9 +207,9 @@ func (p *cephFSProvisioner) Provision(options controller.VolumeOptions) (*v1.Per
 			},
 		},
 		Spec: v1.PersistentVolumeSpec{
-			PersistentVolumeReclaimPolicy: options.PersistentVolumeReclaimPolicy,
+			PersistentVolumeReclaimPolicy: *options.StorageClass.ReclaimPolicy,
 			AccessModes:                   options.PVC.Spec.AccessModes,
-			MountOptions:                  options.MountOptions,
+			MountOptions:                  options.StorageClass.MountOptions,
 			Capacity: v1.ResourceList{
 				// Quotas are supported by the userspace client(ceph-fuse, libcephfs), or kernel client >= 4.17 but only on mimic clusters.
 				// In other cases capacity is meaningless here.
@@ -225,12 +232,12 @@ func (p *cephFSProvisioner) Provision(options controller.VolumeOptions) (*v1.Per
 
 	klog.Infof("successfully created CephFS share %+v", pv.Spec.PersistentVolumeSource.CephFS)
 
-	return pv, nil
+	return pv, controller.ProvisioningFinished, nil
 }
 
 // Delete removes the storage asset that was created by Provision represented
 // by the given PV.
-func (p *cephFSProvisioner) Delete(volume *v1.PersistentVolume) error {
+func (p *cephFSProvisioner) Delete(ctx context.Context, volume *v1.PersistentVolume) error {
 	ann, ok := volume.Annotations[provisionerIDAnn]
 	if !ok {
 		return errors.New("identity annotation not found on PV")
@@ -245,7 +252,7 @@ func (p *cephFSProvisioner) Delete(volume *v1.PersistentVolume) error {
 	// delete CephFS
 	// TODO when beta is removed, have to check kube version and pick v1/beta
 	// accordingly: maybe the controller lib should offer a function for that
-	class, err := p.client.StorageV1beta1().StorageClasses().Get(util.GetPersistentVolumeClass(volume), metav1.GetOptions{})
+	class, err := p.client.StorageV1beta1().StorageClasses().Get(ctx, util.GetPersistentVolumeClass(volume), metav1.GetOptions{})
 	if err != nil {
 		return err
 	}
@@ -279,7 +286,7 @@ func (p *cephFSProvisioner) Delete(volume *v1.PersistentVolume) error {
 		klog.Errorf("failed to get secret references, err: %v", err)
 		return err
 	}
-	err = p.client.CoreV1().Secrets(secretRef.Namespace).Delete(secretRef.Name, &metav1.DeleteOptions{})
+	err = p.client.CoreV1().Secrets(secretRef.Namespace).Delete(ctx, secretRef.Name, metav1.DeleteOptions{})
 	if err != nil {
 		klog.Errorf("Cephfs Provisioner: delete secret failed, err: %v", err)
 		return fmt.Errorf("failed to delete secret")
@@ -301,6 +308,7 @@ func (p *cephFSProvisioner) parseParameters(parameters map[string]string) (strin
 	cluster = "ceph"
 	pvcRoot = "/volumes/kubernetes"
 	deterministicNames = false
+	ctx := context.Background()
 
 	for k, v := range parameters {
 		switch strings.ToLower(k) {
@@ -310,7 +318,7 @@ func (p *cephFSProvisioner) parseParameters(parameters map[string]string) (strin
 			// Try to find DNS info in local cluster DNS so that the kubernetes
 			// host DNS config doesn't have to know about cluster DNS
 			if p.dnsip == "" {
-				p.dnsip = util.FindDNSIP(p.client)
+				p.dnsip = util.FindDNSIP(ctx, p.client)
 			}
 			klog.V(4).Infof("dnsip: %q\n", p.dnsip)
 			arr := strings.Split(v, ",")
@@ -363,7 +371,8 @@ func (p *cephFSProvisioner) parsePVSecret(namespace, secretName string) (string,
 	if p.client == nil {
 		return "", fmt.Errorf("Cannot get kube client")
 	}
-	secrets, err := p.client.CoreV1().Secrets(namespace).Get(secretName, metav1.GetOptions{})
+	ctx := context.Background()
+	secrets, err := p.client.CoreV1().Secrets(namespace).Get(ctx, secretName, metav1.GetOptions{})
 	if err != nil {
 		return "", err
 	}
@@ -425,7 +434,7 @@ func main() {
 
 	// The controller needs to know what the server version is because out-of-tree
 	// provisioners aren't officially supported until 1.5
-	serverVersion, err := clientset.Discovery().ServerVersion()
+	// serverVersion, err := clientset.Discovery().ServerVersion()
 	if err != nil {
 		klog.Fatalf("Error getting server version: %v", err)
 	}
@@ -435,15 +444,16 @@ func main() {
 	klog.Infof("Creating CephFS provisioner %s with identity: %s, secret namespace: %s", prName, prID, *secretNamespace)
 	cephFSProvisioner := newCephFSProvisioner(clientset, prID, *secretNamespace, *enableQuota)
 
+	ctx := context.Background()
+
 	// Start the provision controller which will dynamically provision cephFS
 	// PVs
 	pc := controller.NewProvisionController(
 		clientset,
 		prName,
 		cephFSProvisioner,
-		serverVersion.GitVersion,
 		controller.MetricsPort(int32(*metricsPort)),
 	)
 
-	pc.Run(wait.NeverStop)
+	pc.Run(ctx)
 }
