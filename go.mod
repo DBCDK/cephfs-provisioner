@@ -3,7 +3,7 @@ module github.com/dbcdk/cephfs-provisioner
 go 1.20
 
 require (
-	github.com/kubernetes-sigs/sig-storage-lib-external-provisioner v4.1.0+incompatible
+	sigs.k8s.io/sig-storage-lib-external-provisioner/v9 v9.0.2
 	k8s.io/api v0.27.3
 	k8s.io/apimachinery v0.27.3
 	k8s.io/client-go v0.27.3
