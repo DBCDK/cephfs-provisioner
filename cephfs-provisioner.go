@@ -22,6 +22,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"net"
 	"os"
 	"os/exec"
@@ -299,11 +300,10 @@ func (p *cephFSProvisioner) parseParameters(parameters map[string]string) (strin
 	var (
 		err                                                                           error
 		mon                                                                           []string
-		cluster, adminID, adminSecretName, adminSecretNamespace, adminSecret, pvcRoot string
+		cluster, adminID, adminSecretName, adminSecret, pvcRoot string
 		deterministicNames                                                            bool
 	)
 
-	adminSecretNamespace = "default"
 	adminID = "admin"
 	cluster = "ceph"
 	pvcRoot = "/volumes/kubernetes"
@@ -344,7 +344,7 @@ func (p *cephFSProvisioner) parseParameters(parameters map[string]string) (strin
 		case "adminsecretname":
 			adminSecretName = v
 		case "adminsecretnamespace":
-			adminSecretNamespace = v
+            // Fallthrough, don't want to mutate StorageClass params.
 		case "claimroot":
 			pvcRoot = v
 		case "deterministicnames":
@@ -358,30 +358,18 @@ func (p *cephFSProvisioner) parseParameters(parameters map[string]string) (strin
 	if adminSecretName == "" {
 		return "", "", "", "", nil, false, fmt.Errorf("missing Ceph admin secret name")
 	}
-	if adminSecret, err = p.parsePVSecret(adminSecretNamespace, adminSecretName); err != nil {
-		return "", "", "", "", nil, false, fmt.Errorf("failed to get admin secret from [%q/%q]: %v", adminSecretNamespace, adminSecretName, err)
-	}
+	// Read adminSecret from localfs
+	fileContent, err := ioutil.ReadFile("/kube/provisionerSecret")
+    if err != nil {
+        return "", "", "", "", nil, false, fmt.Errorf("failed to get admin secret from localfs: %v", err)
+    }
+    adminSecret = strings.TrimSpace(string(fileContent))
+
+
 	if len(mon) < 1 {
 		return "", "", "", "", nil, false, fmt.Errorf("missing Ceph monitors")
 	}
 	return cluster, adminID, adminSecret, pvcRoot, mon, deterministicNames, nil
-}
-
-func (p *cephFSProvisioner) parsePVSecret(namespace, secretName string) (string, error) {
-	if p.client == nil {
-		return "", fmt.Errorf("Cannot get kube client")
-	}
-	ctx := context.Background()
-	secrets, err := p.client.CoreV1().Secrets(namespace).Get(ctx, secretName, metav1.GetOptions{})
-	if err != nil {
-		return "", err
-	}
-	for _, data := range secrets.Data {
-		return string(data), nil
-	}
-
-	// If not found, the last secret in the map wins as done before
-	return "", fmt.Errorf("no secret found")
 }
 
 var (
