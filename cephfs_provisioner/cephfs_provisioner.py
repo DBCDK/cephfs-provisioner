@@ -164,7 +164,7 @@ class CephFSNativeDriver(object):
 
             # Construct auth caps that if present might conflict with the desired
             # auth caps.
-            unwanted_access_level = 'r' if want_access_level is 'rw' else 'rw'
+            unwanted_access_level = 'r' if want_access_level == 'rw' else 'rw'
             unwanted_mds_cap = 'allow {0} path={1}'.format(unwanted_access_level, path)
             if namespace:
                 unwanted_osd_cap = 'allow {0} pool={1} namespace={2}'.format(
@@ -326,7 +326,7 @@ class CephFSNativeDriver(object):
             self._volume_client = None
 
 def usage():
-    print "Usage: " + sys.argv[0] + " --remove -n share_name -u ceph_user_id -s size"
+    print("Usage: " + sys.argv[0] + " --remove -n share_name -u ceph_user_id -s size")
 
 def main():
     create = True
@@ -355,7 +355,7 @@ def main():
         sys.exit(1)
 
     if create:
-        print cephfs.create_share(share, user, size=size)
+        print(cephfs.create_share(share, user, size=size))
     else:
         cephfs.delete_share(share, user)
 
