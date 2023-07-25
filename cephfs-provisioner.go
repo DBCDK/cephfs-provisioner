@@ -298,10 +298,10 @@ func (p *cephFSProvisioner) Delete(ctx context.Context, volume *v1.PersistentVol
 
 func (p *cephFSProvisioner) parseParameters(parameters map[string]string) (string, string, string, string, []string, bool, error) {
 	var (
-		err                                                                           error
-		mon                                                                           []string
+		err                                                     error
+		mon                                                     []string
 		cluster, adminID, adminSecretName, adminSecret, pvcRoot string
-		deterministicNames                                                            bool
+		deterministicNames                                      bool
 	)
 
 	adminID = "admin"
@@ -344,7 +344,7 @@ func (p *cephFSProvisioner) parseParameters(parameters map[string]string) (strin
 		case "adminsecretname":
 			adminSecretName = v
 		case "adminsecretnamespace":
-            // Fallthrough, don't want to mutate StorageClass params.
+			// Fallthrough, don't want to mutate StorageClass params.
 		case "claimroot":
 			pvcRoot = v
 		case "deterministicnames":
@@ -360,11 +360,10 @@ func (p *cephFSProvisioner) parseParameters(parameters map[string]string) (strin
 	}
 	// Read adminSecret from localfs
 	fileContent, err := ioutil.ReadFile("/kube/provisionerSecret")
-    if err != nil {
-        return "", "", "", "", nil, false, fmt.Errorf("failed to get admin secret from localfs: %v", err)
-    }
-    adminSecret = strings.TrimSpace(string(fileContent))
-
+	if err != nil {
+		return "", "", "", "", nil, false, fmt.Errorf("failed to get admin secret from localfs: %v", err)
+	}
+	adminSecret = strings.TrimSpace(string(fileContent))
 
 	if len(mon) < 1 {
 		return "", "", "", "", nil, false, fmt.Errorf("missing Ceph monitors")
