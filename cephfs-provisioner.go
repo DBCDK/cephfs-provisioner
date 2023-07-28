@@ -419,9 +419,6 @@ func main() {
 		*secretNamespace = secretNamespaceFromEnv
 	}
 
-	// The controller needs to know what the server version is because out-of-tree
-	// provisioners aren't officially supported until 1.5
-	// serverVersion, err := clientset.Discovery().ServerVersion()
 	if err != nil {
 		klog.Fatalf("Error getting server version: %v", err)
 	}
