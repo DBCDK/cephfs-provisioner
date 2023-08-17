@@ -2,7 +2,7 @@
   description = "dynamic ceph provisioner";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-22.11";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-23.05";
     flake-parts.url = "github:hercules-ci/flake-parts";
   };
 
@@ -16,7 +16,7 @@
   in
     flake-parts.lib.mkFlake {inherit inputs;} {
       flake.overlays.default = final: prev: let
-        python = final.python39;
+        python = final.python310;
       in {
         "${package}" = final.buildGoModule {
           version = "0.1";
