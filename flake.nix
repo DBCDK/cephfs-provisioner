@@ -2,6 +2,7 @@
   description = "dynamic ceph provisioner";
 
   inputs = {
+    # This is kept on 22.11 for a reason -- problems provisioning with newer ceph versions
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-22.11";
     flake-parts.url = "github:hercules-ci/flake-parts";
   };
