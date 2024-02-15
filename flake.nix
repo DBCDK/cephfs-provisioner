@@ -22,7 +22,7 @@
           version = "0.1";
           pname = package;
           src = ./.;
-          vendorSha256 = "sha256-DD73LLQYR/DWolZZUeNO8c93Vnknbjgn5A1UUWs+b+Q=";
+          vendorHash = "sha256-DD73LLQYR/DWolZZUeNO8c93Vnknbjgn5A1UUWs+b+Q=";
 
           buildInputs = [final.makeWrapper];
           propagatedBuildInputs = [python final.ceph];
